@@ -1,0 +1,17 @@
+if BNNs are not training (loss not decreasing)
+
+test 0: works when Non Bayes
+Non Bayes: comment KL in loss computation and comment the eps* sigma from weights = mean + eps * sigma. If it works means that the means (mu) is properly computed and it is either sigma too big or KL scaling (sigma is the one to bet for).
+
+test 1: check if x at each layer is "gaussian-like"
+
+test 2: change sigma: equivalent to changing rho_lower, rho_upper equivalent to changing sigma_mix OR rho_scale_lower_output/rho_scale_upper_output
+
+_____
+
+Entrenar NN (non bayes) varias veces, ver que pesos salen, fit gaussian and then tomar median + std e inicializar mi bayesian mu rho con esos valores
+
+
+_____
+
+Change rho initialisation to ge stigma initialise double higher
