@@ -31,12 +31,12 @@ os.makedirs(path_models, exist_ok=True)
 #
 # Useful functions
 #
-def get_dataset(n_samples, plots=False):
+def get_dataset(n_samples, noise=0.2, plots=False):
     #
     # Datatset
     #
     # Get dataset, reformat to pandas and visualize
-    noisy_moons = datasets.make_moons(n_samples=n_samples, noise=0.2)
+    noisy_moons = datasets.make_moons(n_samples=n_samples, noise=noise)
     X, y = noisy_moons
     df_data = pd.DataFrame(X, columns=["x", "y"])
     df_data["label"] = y.reshape(-1)
@@ -232,6 +232,7 @@ def visualize_predictions(merged_preds, df_original=pd.DataFrame(), outprefix="a
         vmax=0.4,
     )
     cbar = plt.colorbar()
+    plt.title(f"#{outprefix}:{len(merged_preds)}")
     plt.savefig(f"{path_figures}/{outprefix}_uncertainty_colormap.png")
     plt.clf()
     plt.close("all")
@@ -252,6 +253,7 @@ def visualize_predictions(merged_preds, df_original=pd.DataFrame(), outprefix="a
     plt.scatter(sel["x"], sel["y"], c=sel["class1"],
                 cmap=CMAP2, s=20, norm=norm)
     cbar = plt.colorbar()
+    plt.title(f"#{outprefix}:{len(merged_preds)}")
     plt.savefig(f"{path_figures}/{outprefix}_probability_colormap.png")
     plt.clf()
     plt.close("all")
@@ -319,13 +321,23 @@ if __name__ == '__main__':
     reformatted_preds = reformat_predictions(df_preds, df_data)
 
     # visualize
-    
     visualize_predictions(reformatted_preds, outprefix=f"{outprefix}/preds")
-    # visualize missclasified
+
+    # visualize missclassified
     missclassified = reformatted_preds[
         reformatted_preds["predicted_target"] != reformatted_preds["label"]
     ]
     visualize_predictions(
         missclassified, df_original=reformatted_preds, outprefix=f"{outprefix}/missclassified")
+
+    # visualize missclassified . small uncertainties
+    if not force_nonbayesian:
+        # set threshold to 1 sigma
+        uncertainty_threshold = reformatted_preds['class0_std'].std()
+        missclassified_w_smallstd = reformatted_preds[
+            (reformatted_preds["predicted_target"] != reformatted_preds["label"]) & ((reformatted_preds['class0_std']<uncertainty_threshold) | (reformatted_preds['class1_std']<uncertainty_threshold))
+        ]
+        visualize_predictions(
+            missclassified_w_smallstd, df_original=reformatted_preds, outprefix=f"{outprefix}/missclassified_w_std_lt_{round(uncertainty_threshold,2)}")
 
 
