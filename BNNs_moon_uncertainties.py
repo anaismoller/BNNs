@@ -15,7 +15,9 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 import matplotlib.gridspec as gridspec
+from matplotlib.colorbar import Colorbar
 
+plt.style.use(f"file://{os.getcwd()}/pltstyle_supernnova.mplstyle")
 
 #
 # Init
@@ -31,13 +33,30 @@ os.makedirs(path_models, exist_ok=True)
 #
 # Useful functions
 #
-def get_dataset(n_samples, noise=0.2, plots=False):
+
+
+def get_dataset(typ, n_samples, noise=0.2, plots=False):
     #
     # Datatset
     #
     # Get dataset, reformat to pandas and visualize
-    noisy_moons = datasets.make_moons(n_samples=n_samples, noise=noise)
-    X, y = noisy_moons
+    if typ == "moons":
+        dataset = datasets.make_moons(n_samples=n_samples, noise=noise)
+    if typ == "circles":
+        dataset = datasets.make_circles(n_samples=n_samples, noise=noise, factor=0.5)
+    if typ == "blobs":
+        dataset = datasets.make_blobs(
+            n_samples=n_samples, centers=[[-0.25, 0.5], [1.2, 0.25]], cluster_std=noise
+        )
+    if typ == "displaced_blobs":
+        dataset = datasets.make_blobs(
+            n_samples=n_samples, centers=[[0, 0.5], [1, 0.25]], cluster_std=noise
+        )
+    X, y = dataset
+    # # fixing label for blobs
+    # if typ == 'blobs':
+    #     y=(~y.astype(bool)).astype(int)
+
     df_data = pd.DataFrame(X, columns=["x", "y"])
     df_data["label"] = y.reshape(-1)
     df_data["id"] = df_data.index
@@ -56,14 +75,19 @@ def get_dataset(n_samples, noise=0.2, plots=False):
     return inputs, labels, df_data
 
 
-def train_network(rnn, settings, force_nonbayesian=False, plots=False):
-
-    outprefix = 'NN' if force_nonbayesian else 'BNN'
+def train_network(
+    rnn,
+    settings,
+    inputs,
+    labels,
+    force_nonbayesian=False,
+    plots=False,
+    outmodel_name="./models/BNN/TRmoon_TEmoon.pt",
+):
 
     criterion = nn.CrossEntropyLoss(reduction="sum")
     rnn = rnn(settings)
-    optimizer = torch.optim.Adam(
-        rnn.parameters(), lr=settings["learning_rate"])
+    optimizer = torch.optim.Adam(rnn.parameters(), lr=settings["learning_rate"])
 
     if plots:
         # visualize untrained weigths
@@ -106,15 +130,12 @@ def train_network(rnn, settings, force_nonbayesian=False, plots=False):
         # visualize trained weigths
         visualize_weights_params(rnn, outprefix=outprefix, outsufix="trained")
 
-
-    torch.save(
-                rnn.state_dict(),
-                f"{path_models}/{outprefix}.pt",
-            )
+    torch.save(rnn.state_dict(), outmodel_name)
 
     return rnn
 
-def get_rnn_predictions(rnn, force_nonbayesian=False):
+
+def get_rnn_predictions(rnn, inputs, force_nonbayesian=False):
     if force_nonbayesian:
         n_inference_samples = 1
     else:
@@ -131,8 +152,24 @@ def get_rnn_predictions(rnn, force_nonbayesian=False):
     df_preds = pd.concat(dic_df_preds)
     return df_preds
 
-def plot_df_w_labels(df, df_original = pd.DataFrame(),key="label", outprefix="original"):
-    plt.figure(figsize=(7,5))
+
+#
+# pLotting functions
+#
+
+
+def plot_bkgd(df_original):
+    if len(df_original) != 0:
+        # plot background all predictions
+        # select by labels different grey colors
+        sel = df_original[df_original["label"] == 0]
+        plt.scatter(sel["x"], sel["y"], label=f"label 0", color="grey")
+        sel = df_original[df_original["label"] == 1]
+        plt.scatter(sel["x"], sel["y"], label=f"label 1", color="black")
+
+
+def plot_df_w_labels(df, df_original=pd.DataFrame(), key="label", outprefix="original"):
+    plt.figure(figsize=(7, 5))
     plot_bkgd(df_original)
     sel = df[df[key] == 0]
     plt.scatter(sel["x"], sel["y"], label=f"{key} 0", color="orange")
@@ -143,21 +180,11 @@ def plot_df_w_labels(df, df_original = pd.DataFrame(),key="label", outprefix="or
     plt.clf()
     plt.close("all")
 
-# useful function
-def plot_bkgd(df_original):
-    if len(df_original) != 0:
-        # plot background all predictions
-        # select by labels different grey colors
-        sel = df_original[df_original['label'] == 0]
-        plt.scatter(sel["x"], sel["y"], label=f"label 0", color="grey",s=40)
-        sel = df_original[df_original['label'] == 1]
-        plt.scatter(sel["x"], sel["y"], label=f"label 1", color="black",s=40)
 
 def reformat_predictions(df_preds, df_data):
     # aggregate predictions
     df_preds_agg = df_preds.groupby(by="id").median()
-    df_preds_agg[["class0_std", "class1_std"]
-                 ] = df_preds.groupby(by="id").std()
+    df_preds_agg[["class0_std", "class1_std"]] = df_preds.groupby(by="id").std()
     df_preds[df_preds["id"] == 0]
 
     # get predicted target
@@ -174,7 +201,7 @@ def reformat_predictions(df_preds, df_data):
     return merged_preds
 
 
-def visualize_weights_params(rnn, outprefix='BNN', outsufix="init"):
+def visualize_weights_params(rnn, outprefix="BNN", outsufix="init"):
     # visualize weights parameters (mu,rho)
     fig = plt.figure(figsize=(30, 20))
 
@@ -186,7 +213,7 @@ def visualize_weights_params(rnn, outprefix='BNN', outsufix="init"):
             rnn.layers[f"{i}"].mu.detach().view(-1).cpu().numpy(), bins=30, density=True
         )
         ax.tick_params(labelsize=16)
-        ax.set_xlabel(f"layer {i} mu", fontsize=18)
+        ax.set_xlabel(f"layer {i} mu")
 
         ax = plt.subplot(gs[1, i])
         ax.hist(
@@ -195,7 +222,7 @@ def visualize_weights_params(rnn, outprefix='BNN', outsufix="init"):
             density=True,
         )
         ax.tick_params(labelsize=16)
-        ax.set_xlabel(f"layer {i} sigma", fontsize=18)
+        ax.set_xlabel(f"layer {i} sigma")
 
         # Blundel S/N (importance of weights)
         ax = plt.subplot(gs[2, i])
@@ -206,90 +233,137 @@ def visualize_weights_params(rnn, outprefix='BNN', outsufix="init"):
             density=True,
         )
         ax.tick_params(labelsize=16)
-        ax.set_xlabel(f"layer {i} mu/sigma (S/N)", fontsize=18)
+        ax.set_xlabel(f"layer {i} mu/sigma (S/N)")
 
     plt.savefig(f"{path_figures}/{outprefix}/weights_{outsufix}.png")
 
 
-def visualize_predictions(merged_preds, df_original=pd.DataFrame(), outprefix="all"):
-    """ visualize predictions
+def paper_visualize_predictions(
+    train_dataset_tuple, dic_preds, outnamefix, nn_type="BNN"
+):
+
+    keys = ["class0", "class0_std"]
+    if nn_type == "BNN":
+        outnames = ["probability", "uncertainty"]
+    else:
+        outnames = ["probability"]
+    for outname, key in zip(outnames, keys):
+        cmap = plt.cm.RdYlBu if outname == "probability" else plt.cm.YlOrBr_r
+        fig = plt.figure(figsize=(50, 15))
+        gs = gridspec.GridSpec(
+            3,
+            4,
+            width_ratios=[0.25, 0.25, 0.25, 0.25],
+            height_ratios=[0.45, 0.45, 0.1],
+            wspace=0.01,
+            hspace=0.1,
+        )
+        #
+        ax0 = plt.subplot(gs[:-1, 0])
+        train_noise, train_inputs, train_labels = train_dataset_tuple
+        list_colors_to_use = ["darkblue", "darkred"]
+        list_colors = [list_colors_to_use[k] for k in train_labels.data.numpy()]
+        plt.scatter(train_inputs[:, 0], train_inputs[:, 1], c=list_colors, s=350)
+        ax0.set_xlim(-1.5, 2.5)
+        ax0.set_ylim(-1, 1.5)
+        ax0.tick_params(labelsize=16)
+        ax0.set_title(f"training set (noise {train_noise})", fontsize=26)
+        # preds
+        for i in range(3):
+            noise_value = [k for k in dic_preds.keys()][i]
+            df = dic_preds[noise_value]
+            ax = plt.subplot(gs[:-1, i + 1], sharey=ax0)
+            plt1 = ax.scatter(
+                df["x"],
+                df["y"],
+                c=df[key],
+                cmap=cmap,
+                s=350,
+                vmin=0.0,
+                vmax=df[key].max(),
+            )
+            # overimpose missclassified points
+            sel = df[df["label"] != df["predicted_target"]]
+            if len(sel) > 0:
+                edgecolors = [
+                    "darkblue" if sel["label"].iloc[i] == 0 else "darkred"
+                    for i in range(len(sel))
+                ]
+                plt2 = ax.scatter(
+                    sel["x"],
+                    sel["y"],
+                    c=sel[key],
+                    cmap=cmap,
+                    s=400,
+                    vmin=0.0,
+                    vmax=df[key].max(),
+                    edgecolors=edgecolors,
+                    linewidths=5,
+                )
+            ax.tick_params(labelsize=16)
+            ax.set_xlim(-1.5, 2.5)
+            ax.set_ylim(-1, 1.5)
+            plt.setp(ax.get_yticklabels(), visible=False)
+            ax.set_title(f"noise {round(noise_value,1)}", fontsize=26)
+
+        plt.tight_layout()
+
+        cb = Colorbar(
+            ax=plt.subplot(gs[-1, 1:]),
+            mappable=plt1,
+            orientation="horizontal",
+            ticklocation="bottom",
+        )
+        cb.ax.tick_params(labelsize=16)
+        cb.set_label(f"classification {outname}", fontsize=26)
+        plt.tight_layout()
+        plt.savefig(f"{path_figures}/{outnamefix}_{outname}.png")
+        plt.clf()
+        plt.close("all")
+
+
+if __name__ == "__main__":
+
+    """Parse arguments
     """
-
-    # predicted targets
-    plot_df_w_labels(merged_preds,df_original=df_original,
-                     key="predicted_target", outprefix=f"{outprefix}_preds")
-
-    # colormap uncertainty
-    plt.figure(figsize=(7,5))
-    plot_bkgd(df_original)
-    plt.scatter(
-        merged_preds["x"],
-        merged_preds["y"],
-        c=merged_preds["class0_std"],
-        cmap=CMAP,
-        s=20,
-        vmin=0,
-        vmax=0.4,
-    )
-    cbar = plt.colorbar()
-    plt.title(f"#{outprefix}:{len(merged_preds)}")
-    plt.savefig(f"{path_figures}/{outprefix}_uncertainty_colormap.png")
-    plt.clf()
-    plt.close("all")
-
-    # visualize classification probability for each predicted target
-    # colorbar hack
-    zs = np.concatenate(
-        [merged_preds["class0"], merged_preds["class1"]], axis=0)
-    min_, max_ = zs.min(), zs.max()
-    norm = plt.Normalize(min_, max_)
-    plt.figure(figsize=(10, 5))
-    plot_bkgd(df_original)
-    sel = merged_preds[merged_preds["predicted_target"] == 0]
-    plt.scatter(sel["x"], sel["y"], c=sel["class0"],
-                cmap=CMAP, s=20, norm=norm)
-    cbar = plt.colorbar()
-    sel = merged_preds[merged_preds["predicted_target"] == 1]
-    plt.scatter(sel["x"], sel["y"], c=sel["class1"],
-                cmap=CMAP2, s=20, norm=norm)
-    cbar = plt.colorbar()
-    plt.title(f"#{outprefix}:{len(merged_preds)}")
-    plt.savefig(f"{path_figures}/{outprefix}_probability_colormap.png")
-    plt.clf()
-    plt.close("all")
-
-
-if __name__ == '__main__':
-
-    '''Parse arguments
-    '''
     parser = argparse.ArgumentParser(
-        description='Selection function data vs simulations')
-    parser.add_argument('--n_samples', type=int,
-                        default=1000,
-                        help="generated samples")
-    parser.add_argument('--retrain',
-                        action="store_true",
-                        help="retrain the network")
-    parser.add_argument('--plot', 
-                        action="store_true",
-                        help="do plots")
-    parser.add_argument('--nonbayesian', 
-                        action="store_true",
-                        help="non Bayesian NN")
+        description="Selection function data vs simulations"
+    )
+    parser.add_argument(
+        "--test_samples", type=int, default=1000, help="generated samples"
+    )
+    parser.add_argument(
+        "--train_samples", type=int, default=10000, help="generated samples"
+    )
+    parser.add_argument(
+        "--train_type", type=str, default="moons", help="train dataset type"
+    )
+    parser.add_argument(
+        "--test_type", type=str, default="moons", help="test dataset type"
+    )
+    parser.add_argument("--train_noise", type=float, default=0.2, help="train noise")
+    parser.add_argument(
+        "--no_train", action="store_true", help="do not train the network"
+    )
+    parser.add_argument("--plot", action="store_true", help="do plots")
+    parser.add_argument("--nonbayesian", action="store_true", help="non Bayesian NN")
 
     args = parser.parse_args()
 
-    n_samples = args.n_samples
-    retrain = args.retrain
+    train_samples = args.train_samples
+    test_samples = args.test_samples
+    train = True if not args.no_train else False
     plots = args.plot
     force_nonbayesian = args.nonbayesian
+    train_type = args.train_type
+    test_type = args.test_type
+    train_noise = args.train_noise
 
-    outprefix = 'NN' if force_nonbayesian else 'BNN'
-    os.makedirs(f"{path_figures}/{outprefix}/", exist_ok=True)
-
-    # dataset
-    inputs, labels, df_data = get_dataset(n_samples, plots=plots)
+    nn_type = "NN" if force_nonbayesian else "BNN"
+    trainprefix = f"{nn_type}_TR{train_type}_N{str(train_noise).strip('0.')}"
+    outprefix = f"{trainprefix}_TE{test_type}"
+    os.makedirs(f"{path_figures}/{nn_type}/", exist_ok=True)
+    os.makedirs(f"{path_models}/{nn_type}/", exist_ok=True)
 
     # network settings
     settings = {}
@@ -304,40 +378,50 @@ if __name__ == '__main__':
     settings["rho_scale_lower"] = 4.0
     settings["rho_scale_upper"] = 3.0
 
+    # training dataset
+    train_inputs, train_labels, _ = get_dataset(
+        train_type, train_samples, noise=train_noise, plots=plots
+    )
+    train_dataset_tuple = (train_noise, train_inputs, train_labels)
+
     # network BBB
     rnn = BNN
-    if retrain:
-        rnn = train_network(rnn, settings, force_nonbayesian=force_nonbayesian, plots=plots)
+    if train:
+        rnn = train_network(
+            rnn,
+            settings,
+            train_inputs,
+            train_labels,
+            outmodel_name=f"{path_models}/{nn_type}/{trainprefix}.pt",
+            force_nonbayesian=force_nonbayesian,
+            plots=plots,
+        )
     else:
         rnn = rnn(settings)
-        rnn_state = torch.load(f'{path_models}/{outprefix}.pt', map_location=lambda storage, loc: storage)
+        rnn_state = torch.load(
+            f"{path_models}/{nn_type}/{trainprefix}.pt",
+            map_location=lambda storage, loc: storage,
+        )
         rnn.load_state_dict(rnn_state)
     #
     # Predictions
     #
-    df_preds = get_rnn_predictions(rnn,force_nonbayesian=force_nonbayesian)
+    dic_preds = {}
+    list_noise_values = [0.1, 0.2, 0.3] if "blobs" not in test_type else [0.3, 0.4, 0.5]
+    for noise_value in list_noise_values:
+        # get preds
+        test_inputs, test_labels, test_df_data = get_dataset(
+            test_type, test_samples, noise=noise_value
+        )
+        df_preds = get_rnn_predictions(
+            rnn, test_inputs, force_nonbayesian=force_nonbayesian
+        )
+        dic_preds[noise_value] = reformat_predictions(df_preds, test_df_data)
 
-    # reformat, aggregate and visualize
-    reformatted_preds = reformat_predictions(df_preds, df_data)
-
-    # visualize
-    visualize_predictions(reformatted_preds, outprefix=f"{outprefix}/preds")
-
-    # visualize missclassified
-    missclassified = reformatted_preds[
-        reformatted_preds["predicted_target"] != reformatted_preds["label"]
-    ]
-    visualize_predictions(
-        missclassified, df_original=reformatted_preds, outprefix=f"{outprefix}/missclassified")
-
-    # visualize missclassified . small uncertainties
-    if not force_nonbayesian:
-        # set threshold to 1 sigma
-        uncertainty_threshold = reformatted_preds['class0_std'].std()
-        missclassified_w_smallstd = reformatted_preds[
-            (reformatted_preds["predicted_target"] != reformatted_preds["label"]) & ((reformatted_preds['class0_std']<uncertainty_threshold) | (reformatted_preds['class1_std']<uncertainty_threshold))
-        ]
-        visualize_predictions(
-            missclassified_w_smallstd, df_original=reformatted_preds, outprefix=f"{outprefix}/missclassified_w_std_lt_{round(uncertainty_threshold,2)}")
-
+    # paper visualizations
+    outname = f"{nn_type}/{outprefix}_baseline"
+    print(outname)
+    paper_visualize_predictions(
+        train_dataset_tuple, dic_preds, outname, nn_type=nn_type
+    )
 
