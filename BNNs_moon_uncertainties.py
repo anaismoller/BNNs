@@ -157,7 +157,7 @@ def train_network_SWA(
         optimizer.zero_grad()
         # Forward pass
         output = rnn(inputs, force_nonbayesian=True)
-        clf_loss = criterion(output.squeeze(), labels).backward()
+        criterion(output.squeeze(), labels).backward()
         optimizer.step()
         if epoch > swa_start:
             swa_model.update_parameters(rnn)
@@ -165,9 +165,12 @@ def train_network_SWA(
         else:
             scheduler.step()
 
-    torch.save(rnn.state_dict(), outmodel_name)
+    # Update bn statistics for the swa_model at the end
+    torch.optim.swa_utils.update_bn((input, labels), swa_model)
 
-    return rnn
+    torch.save(swa_model.state_dict(), outmodel_name)
+
+    return swa_model
 
 
 def get_rnn_predictions(rnn, inputs, force_nonbayesian=False):
