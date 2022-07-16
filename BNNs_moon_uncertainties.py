@@ -135,6 +135,41 @@ def train_network(
     return rnn
 
 
+def train_network_SWA(
+    rnn, settings, inputs, labels, outmodel_name="./models/BNN/TRmoon_TEmoon_SWA.pt",
+):
+
+    from torch.optim.swa_utils import AveragedModel, SWALR
+    from torch.optim.lr_scheduler import CosineAnnealingLR
+
+    criterion = nn.CrossEntropyLoss(reduction="sum")
+    rnn = rnn(settings)
+    swa_model = AveragedModel(rnn)
+
+    optimizer = torch.optim.Adam(rnn.parameters(), lr=settings["learning_rate"])
+    scheduler = CosineAnnealingLR(optimizer, T_max=100)
+
+    swa_start = 5
+    swa_scheduler = SWALR(optimizer, swa_lr=0.05)
+
+    for epoch in range(1000):
+        #   rnn.train()
+        optimizer.zero_grad()
+        # Forward pass
+        output = rnn(inputs, force_nonbayesian=True)
+        clf_loss = criterion(output.squeeze(), labels).backward()
+        optimizer.step()
+        if epoch > swa_start:
+            swa_model.update_parameters(rnn)
+            swa_scheduler.step()
+        else:
+            scheduler.step()
+
+    torch.save(rnn.state_dict(), outmodel_name)
+
+    return rnn
+
+
 def get_rnn_predictions(rnn, inputs, force_nonbayesian=False):
     if force_nonbayesian:
         n_inference_samples = 1
@@ -347,6 +382,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--plot", action="store_true", help="do plots")
     parser.add_argument("--nonbayesian", action="store_true", help="non Bayesian NN")
+    parser.add_argument("--SWA", action="store_true", help="SWA")
 
     args = parser.parse_args()
 
@@ -360,8 +396,11 @@ if __name__ == "__main__":
     train_noise = args.train_noise
 
     nn_type = "NN" if force_nonbayesian else "BNN"
-    trainprefix = f"{nn_type}_TR{train_type}_N{str(train_noise).strip('0.')}"
-    outprefix = f"{trainprefix}_TE{test_type}"
+    extra_prefix = "_SWA" if args.SWA else ""
+    trainprefix = (
+        f"{nn_type}{extra_prefix}_TR{train_type}_N{str(train_noise).strip('0.')}"
+    )
+    outprefix = f"{trainprefix}{extra_prefix}_TE{test_type}"
     os.makedirs(f"{path_figures}/{nn_type}/", exist_ok=True)
     os.makedirs(f"{path_models}/{nn_type}/", exist_ok=True)
 
@@ -387,15 +426,24 @@ if __name__ == "__main__":
     # network BBB
     rnn = BNN
     if train:
-        rnn = train_network(
-            rnn,
-            settings,
-            train_inputs,
-            train_labels,
-            outmodel_name=f"{path_models}/{nn_type}/{trainprefix}.pt",
-            force_nonbayesian=force_nonbayesian,
-            plots=plots,
-        )
+        if args.SWA:
+            rnn = train_network_SWA(
+                rnn,
+                settings,
+                train_inputs,
+                train_labels,
+                outmodel_name=f"{path_models}/{nn_type}/{trainprefix}.pt",
+            )
+        else:
+            rnn = train_network(
+                rnn,
+                settings,
+                train_inputs,
+                train_labels,
+                outmodel_name=f"{path_models}/{nn_type}/{trainprefix}.pt",
+                force_nonbayesian=force_nonbayesian,
+                plots=plots,
+            )
     else:
         rnn = rnn(settings)
         rnn_state = torch.load(
